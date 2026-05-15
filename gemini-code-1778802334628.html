@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transactions History - VGT for Mom</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; padding: 20px; display: flex; justify-content: center; }
+    .container { width: 100%; max-width: 600px; background: #1e293b; padding: 25px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
+    h1 { margin-top: 0; font-size: 22px; text-align: center; border-bottom: 1px solid #334155; padding-bottom: 15px; }
+    
+    .input-group { display: flex; gap: 10px; margin-bottom: 15px; }
+    input, textarea { padding: 12px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; font-size: 16px; flex: 1; }
+    
+    .color-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 20px; }
+    button { cursor: pointer; transition: 0.2s; font-weight: bold; border: none; border-radius: 6px; }
+    button.color-btn { padding: 10px 5px; font-size: 12px; color: white; }
+    button.color-btn:hover { transform: scale(1.05); }
+    
+    /* Standard Colors */
+    .green { background: #22c55e; } .blue { background: #3b82f6; } .yellow { background: #eab308; color: black; }
+    .orange { background: #f97316; } .red { background: #ef4444; } .purple { background: #a855f7; }
+    .pink { background: #ec4899; } .cyan { background: #06b6d4; } .lime { background: #84cc16; color: black; }
+    .teal { background: #14b8a6; } .indigo { background: #6366f1; } .gray { background: #64748b; }
+    .brown { background: #a16207; } .gold { background: #fbbf24; color: black; } .silver { background: #cbd5e1; color: black; }
+
+    .entry { display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-top: 8px; border-radius: 8px; font-weight: 600; }
+    .entry-actions button { background: rgba(255,255,255,0.2); color: white; padding: 5px 10px; font-size: 11px; margin-left: 5px; }
+    .total { margin-top: 25px; font-size: 26px; font-weight: 800; border-top: 3px solid #3b82f6; padding-top: 15px; text-align: right; color: #60a5fa; }
+    
+    /* Import Section */
+    .import-section { margin-top: 40px; border: 1px dashed #475569; padding: 15px; border-radius: 12px; }
+    .import-section h3 { margin-top: 0; font-size: 16px; color: #94a3b8; }
+    textarea { width: 100%; height: 100px; box-sizing: border-box; font-family: monospace; font-size: 12px; margin-bottom: 10px; }
+    .btn-import { background: #3b82f6; color: white; padding: 10px 20px; width: 100%; }
+    
+    .status-msg { font-size: 12px; text-align: center; color: #fbbf24; margin-bottom: 10px; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>💰 Transactions History - VGT</h1>
+  <div id="status" class="status-msg"></div>
+
+  <div class="input-group">
+    <input type="date" id="date" />
+    <input type="text" id="amount" placeholder="Enter Amount" oninput="formatInput(this)" />
+  </div>
+
+  <div class="color-grid" id="colorGrid"></div>
+  <div id="entries"></div>
+  <div class="total" id="total">TOTAL: $0.00</div>
+
+  <div class="import-section">
+    <h3>📥 Bulk Import Log</h3>
+    <textarea id="importLog" placeholder="Paste your log here... e.g. 🟩 1. 01/29/2026 → $1,000.00"></textarea>
+    <button class="btn-import" onclick="processBulkImport()">Process & Save All</button>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAD5RXvC8e1g-GAnYc2HZvrDHFW05_8X1c",
+    authDomain: "mom-vgt-tracker.firebaseapp.com",
+    projectId: "mom-vgt-tracker",
+    storageBucket: "mom-vgt-tracker.firebasestorage.app",
+    messagingSenderId: "454248621332",
+    appId: "1:454248621332:web:7d85874c2e8f18751c8e01"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const colRef = collection(db, "transactions");
+
+  let editId = null;
+
+  window.formatInput = (input) => {
+    let value = input.value.replace(/[^0-9.]/g, '');
+    let parts = value.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    input.value = parts.length > 1 ? parts[0] + '.' + parts[1].slice(0, 2) : parts[0];
+  };
+
+  const parseRawValue = (val) => parseFloat(val.replace(/[^0-9.]/g, '')) || 0;
+
+  window.saveEntry = async (color = 'gray') => {
+    const date = document.getElementById('date').value;
+    const amount = parseRawValue(document.getElementById('amount').value);
+    if (!date || amount === 0) return alert("Missing data");
+
+    try {
+      if (editId) {
+        await updateDoc(doc(db, "transactions", editId), { date, amount, color });
+        editId = null; document.getElementById('status').innerText = "";
+      } else {
+        await addDoc(colRef, { date, amount, color, createdAt: Date.now() });
+      }
+      document.getElementById('date').value = '';
+      document.getElementById('amount').value = '';
+    } catch (e) { alert("Check Firestore Rules!"); }
+  };
+
+  // --- BULK IMPORT LOGIC ---
+  window.processBulkImport = async () => {
+    const logText = document.getElementById('importLog').value;
+    const lines = logText.split('\n');
+    const emojiMap = { '🟩': 'green', '🟦': 'blue', '🟨': 'yellow', '🟧': 'orange', '🟥': 'red' };
+    
+    // Regex looks for: [Emoji] [Number]. [MM/DD/YYYY] → $[Amount]
+    const regex = /([🟩🟦🟨🟧🟥])\s+\d+\.\s+(\d{2}\/\d{2}\/\d{4})\s+→\s+\$([\d,]+\.?\d*)/;
+
+    let count = 0;
+    document.getElementById('status').innerText = "Processing...";
+
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(regex);
+      if (match) {
+        const colorEmoji = match[1];
+        const rawDate = match[2]; // 01/29/2026
+        const rawAmount = match[3]; // 1,000.00
+
+        // Convert MM/DD/YYYY to YYYY-MM-DD
+        const [m, d, y] = rawDate.split('/');
+        const dbDate = `${y}-${m}-${d}`;
+        const amount = parseRawValue(rawAmount);
+        const color = emojiMap[colorEmoji] || 'gray';
+
+        try {
+          // staggered createdAt ensures order is kept
+          await addDoc(colRef, { date: dbDate, amount, color, createdAt: Date.now() + i });
+          count++;
+        } catch (e) { console.error(e); }
+      }
+    }
+
+    document.getElementById('importLog').value = '';
+    document.getElementById('status').innerText = `Successfully imported ${count} entries!`;
+    setTimeout(() => { document.getElementById('status').innerText = ""; }, 5000);
+  };
+
+  // Setup Buttons
+  const colors = ['green', 'blue', 'yellow', 'orange', 'red', 'purple', 'pink', 'cyan', 'lime', 'teal', 'indigo', 'gray', 'brown', 'gold', 'silver'];
+  const grid = document.getElementById('colorGrid');
+  colors.forEach(c => {
+    const b = document.createElement('button');
+    b.className = `color-btn ${c}`;
+    b.innerText = c.charAt(0).toUpperCase() + c.slice(1);
+    b.onclick = () => window.saveEntry(c);
+    grid.appendChild(b);
+  });
+
+  // Sync List
+  const q = query(colRef, orderBy("createdAt", "asc"));
+  onSnapshot(q, (snapshot) => {
+    const listDiv = document.getElementById('entries');
+    listDiv.innerHTML = '';
+    let total = 0;
+    snapshot.docs.forEach((docSnap, index) => {
+      const d = docSnap.data();
+      total += d.amount;
+      const displayDate = d.date.includes('-') ? d.date.split('-').slice(1).join('/') + '/' + d.date.split('-')[0] : d.date;
+      const div = document.createElement('div');
+      div.className = `entry ${d.color}`;
+      div.innerHTML = `<span>${index + 1}. ${displayDate} → ${d.amount.toLocaleString('en-US',{style:'currency',currency:'USD'})}</span>
+        <div class="entry-actions">
+          <button onclick="editItem('${docSnap.id}', '${d.date}', '${d.amount}')">Edit</button>
+          <button onclick="deleteItem('${docSnap.id}')">Del</button>
+        </div>`;
+      listDiv.appendChild(div);
+    });
+    document.getElementById('total').innerText = `TOTAL: ${total.toLocaleString('en-US',{style:'currency',currency:'USD'})}`;
+  });
+
+  window.editItem = (id, date, amount) => {
+    document.getElementById('date').value = date;
+    document.getElementById('amount').value = parseFloat(amount).toLocaleString('en-US');
+    editId = id;
+    document.getElementById('status').innerText = "⚠️ EDITING MODE";
+    window.scrollTo(0,0);
+  };
+
+  window.deleteItem = (id) => { if(confirm("Delete?")) deleteDoc(doc(db, "transactions", id)); };
+</script>
+</body>
+</html>
